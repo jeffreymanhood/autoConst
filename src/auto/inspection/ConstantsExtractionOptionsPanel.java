@@ -85,7 +85,7 @@ public class ConstantsExtractionOptionsPanel extends JPanel
             @Override
             public void setEnabled(boolean b)
             {
-                // best hack ever
+                // best hack ever - don't touch my components GuiUtils! You and your enableChildren method ... don't bring that here.
                 if(!Reflection.getCallerClass(3).toString().matches(".*GuiUtils.*"))
                 {
                     super.setEnabled(b);
@@ -227,7 +227,7 @@ public class ConstantsExtractionOptionsPanel extends JPanel
         @Override
         public void setEnabled(boolean b)
         {
-            // the hack so good we had to use it again
+            // the hack so good we had to use it thrice
             if(!Reflection.getCallerClass(3).toString().matches(".*GuiUtils.*"))
             {
                 super.setEnabled(b);

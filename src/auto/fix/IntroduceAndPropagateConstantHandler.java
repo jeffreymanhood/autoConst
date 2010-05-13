@@ -29,6 +29,7 @@ import com.intellij.psi.search.PackageScope;
 import com.intellij.psi.search.SearchScope;
 import com.intellij.psi.search.searches.AllClassesSearch;
 import com.intellij.psi.search.searches.ClassInheritorsSearch;
+import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.refactoring.BaseRefactoringProcessor;
 import com.intellij.refactoring.introduceVariable.IntroduceVariableBase;
@@ -54,6 +55,9 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
     private String lastActionCommand = IntroduceAndPropagateDialog.CLASS_ACTION_COMMAND;
     private static final String REFACTORING_NAME = "IntroduceAndPropagateConstant";
     private String lastConstantName;
+    private static final String CONSTANTS_IF_POSTFIX = "ConstantsIF";
+    private static final String JAVA_FILE_TYPE = ".java";
+    private static final boolean INCLUDE_SUBPACKAGES = true;
 
     public IntroduceAndPropagateConstantHandler(Project project, PsiLiteralExpression literalExpression)
     {
@@ -67,7 +71,7 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
     {
         IntroduceAndPropagateDialog dialog = new IntroduceAndPropagateDialog(project, psiExpression, descriptor);
         dialog.addPropagateSettingsListener(this);
-        dialog.setVisible(true);        
+        dialog.setVisible(INCLUDE_SUBPACKAGES);        
     }
 
     public void setPropagateSettings(String actionCommand, String constantName, boolean isPreview)
@@ -109,7 +113,7 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
             //ignore - this means that the occurrence of the expression no longer exists
         }
 
-        return cleanseFieldOccurrences(new HashSet<PsiExpression>(Arrays.asList(occurrences)));
+        return /*cleanseFieldOccurrences*/(new HashSet<PsiExpression>(Arrays.asList(occurrences)));
     }
 
     private static HashSet<PsiExpression> cleanseFieldOccurrences(HashSet<PsiExpression> psiExpressions)
@@ -117,7 +121,7 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
         HashSet<PsiExpression> removeTheseExpression = new HashSet<PsiExpression>();
         for(PsiExpression expression : psiExpressions)
         {
-            if(expression instanceof PsiField)
+            if(PsiTreeUtil.getParentOfType(expression,PsiField.class) != null)
             {
                 removeTheseExpression.add(expression);
             }
@@ -137,7 +141,7 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
         if(elementsFound.size() > 0)
         {
             PsiClass newInterface = createNewInterface(aPackage);
-            createConstants(elementsFound, newInterface, PsiModifier.PACKAGE_LOCAL, true, constantName);
+            createConstants(elementsFound, newInterface, PsiModifier.PACKAGE_LOCAL, INCLUDE_SUBPACKAGES, constantName);
         }
     }
 
@@ -174,7 +178,7 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
     {
         if (aPackage != null)
         {
-            GlobalSearchScope searchScope = PackageScope.packageScope(aPackage, true);
+            GlobalSearchScope searchScope = PackageScope.packageScope(aPackage, INCLUDE_SUBPACKAGES);
             Query<PsiClass> query = AllClassesSearch.search(searchScope, myProject);
             getOccurrencesFromFindAllQuery(query, elementsFound);
         }
@@ -189,14 +193,14 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
             public void run()
             {
                 PsiDirectory directory = aPackage.getDirectories()[0];
-                String fileName = createConstantsIFName(aPackage.getName()) + "ConstantsIF";
+                String fileName = createConstantsIFName(aPackage.getName()) + CONSTANTS_IF_POSTFIX;
 
-                String javaFileName = fileName + ".java";
+                String javaFileName = fileName + JAVA_FILE_TYPE;
                 if(directory.findFile(javaFileName) == null)
                 {
                     targetClass[0] = JavaDirectoryService.getInstance()
                         .createInterface(directory, fileName);
-                    PsiUtil.setModifierProperty(targetClass[0], PsiKeyword.PUBLIC, true);
+                    PsiUtil.setModifierProperty(targetClass[0], PsiKeyword.PUBLIC, INCLUDE_SUBPACKAGES);
                 }
                 else
                 {
@@ -256,7 +260,7 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
     {
         @SuppressWarnings({"ConstantConditions"})
         SearchScope scope = GlobalSearchScope.moduleScope(ModuleUtil.findModuleForPsiElement(myLiteralExpression.getContainingFile()));
-        Query<PsiClass> query = ClassInheritorsSearch.search(baseClass, scope, true, true);
+        Query<PsiClass> query = ClassInheritorsSearch.search(baseClass, scope, INCLUDE_SUBPACKAGES, INCLUDE_SUBPACKAGES);
 
         HashSet<PsiExpression> elementsFound = new HashSet<PsiExpression>();
         getOccurrencesFromFindAllQuery(query, elementsFound);
@@ -281,9 +285,10 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
         PsiClass retVal = topLevelClass;
 
         PsiReferenceList extendsList = topLevelClass.getExtendsList();
-        if(extendsList != null && extendsList.getChildren().length > 0 && topLevelClass.getSuperClass() != null)
+        PsiClass superClass = topLevelClass.getSuperClass();
+        if(extendsList != null && extendsList.getChildren().length > 0 && superClass != null && superClass.isWritable())
         {
-            retVal = findBaseClass(topLevelClass.getSuperClass());
+            retVal = findBaseClass(superClass);
         }
 
         return retVal;
@@ -295,14 +300,27 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
         PsiManager psiManager = destinationClass.getManager();
         PsiElementFactory factory = JavaPsiFacade.getInstance(psiManager.getProject()).getElementFactory();
         @SuppressWarnings({"ConstantConditions"})
-        PsiField field = factory.createField(constantName, psiExpressions.iterator().next().getType());
-        field.setInitializer(psiExpressions.iterator().next());
-        //noinspection ConstantConditions
-        field.getModifierList().setModifierProperty(visibility, true);
-        if(anyStaticOccurrences(psiExpressions))
+
+        boolean fieldAlreadyExists = false;
+        PsiField field = getExistingField(psiExpressions, destinationClass);
+        psiExpressions = cleanseFieldOccurrences(psiExpressions);
+        if(field == null)
         {
+            field = factory.createField(constantName, psiExpressions.iterator().next().getType());
+            field.setInitializer(psiExpressions.iterator().next());
             //noinspection ConstantConditions
-            field.getModifierList().setModifierProperty(PsiModifier.STATIC, true);
+            field.getModifierList().setModifierProperty(visibility, INCLUDE_SUBPACKAGES);
+            if(anyStaticOccurrences(psiExpressions))
+            {
+                //noinspection ConstantConditions
+                field.getModifierList().setModifierProperty(PsiModifier.STATIC, INCLUDE_SUBPACKAGES);
+            }
+
+            field = (PsiField)CodeStyleManager.getInstance(psiManager.getProject()).reformat(field);
+        }
+        else
+        {
+            fieldAlreadyExists = true;
         }
 
         PsiElement multiExpressionsAnchor =
@@ -322,9 +340,28 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
             }
         }
 
-        field = (PsiField)CodeStyleManager.getInstance(psiManager.getProject()).reformat(field);
-        writeFieldToDestinationClass(destinationClass, field, multiExpressionsAnchor, psiExpressions, isDestinationClassNew, createExpressionsClassMap(psiExpressions));
+        writeFieldToDestinationClass(destinationClass, isDestinationClassNew, field, fieldAlreadyExists, multiExpressionsAnchor, psiExpressions, createExpressionsClassMap(psiExpressions));
 
+    }
+
+    private static PsiField getExistingField(HashSet<PsiExpression> psiExpressions, PsiClass destinationClass)
+    {
+        PsiField retVal = null;
+        for(PsiExpression expression : psiExpressions)
+        {
+            PsiField field = PsiTreeUtil.getParentOfType(expression, PsiField.class);
+            if(field != null)
+            {
+                PsiClass topLevelClass = PsiUtil.getTopLevelClass(field);
+                if(topLevelClass != null && topLevelClass.equals(destinationClass))
+                {
+                    retVal = field;
+                    psiExpressions.remove(expression);
+                    break;
+                }
+            }
+        }
+        return retVal;
     }
 
     private static HashMap<PsiExpression, PsiJavaFile> createExpressionsClassMap(HashSet<PsiExpression> psiExpressions)
@@ -354,19 +391,20 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
     private static PsiMethod findContainingMethod(PsiExpression expression)
     {
         PsiElement methodElement= expression.getParent();
-        while(!(methodElement instanceof PsiMethod || methodElement instanceof PsiClass))
+        while(methodElement != null && !(methodElement instanceof PsiMethod))
         {
             methodElement = methodElement.getParent();
         }
 
-        assert methodElement instanceof PsiMethod;
+        assert methodElement != null;
 
         return (PsiMethod)methodElement;
     }
 
-    private static void writeFieldToDestinationClass(final PsiClass destinationClass, final PsiField field, final PsiElement multiExpressionsAnchor,
+    private static void writeFieldToDestinationClass(final PsiClass destinationClass, final boolean isDestinationClassNew, final PsiField field,
+                                                     final boolean fieldAlreadyExists,
+                                                     final PsiElement multiExpressionsAnchor,
                                                      final HashSet<PsiExpression> psiExpressions,
-                                                     final boolean isDestinationClassNew,
                                                      final HashMap<PsiExpression, PsiJavaFile> expressionsClassMap)
     {
         final PsiJavaFile destinationFile = (PsiJavaFile)destinationClass.getContainingFile();
@@ -376,13 +414,16 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
 
             public void run()
             {
-                destinationClass.add(field);
                 Project project = field.getManager().getProject();
 
-                if (multiExpressionsAnchor != null && multiExpressionsAnchor instanceof PsiField)
+                if(!fieldAlreadyExists)
                 {
-                    destinationClass.addAfter(CodeEditUtil.createLineFeed(field.getManager()), multiExpressionsAnchor);
-                    CodeStyleManager.getInstance(project).adjustLineIndent(destinationClass.getContainingFile(), field.getTextRange());
+                    destinationClass.add(field);
+                    if (multiExpressionsAnchor != null && multiExpressionsAnchor instanceof PsiField)
+                    {
+                        destinationClass.addAfter(CodeEditUtil.createLineFeed(field.getManager()), multiExpressionsAnchor);
+                        CodeStyleManager.getInstance(project).adjustLineIndent(destinationClass.getContainingFile(), field.getTextRange());
+                    }
                 }
 
                 for (PsiExpression occurrence : psiExpressions)
@@ -418,10 +459,28 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
                 if(type != PsiType.DOUBLE && type != PsiType.BYTE && type != PsiType.FLOAT && type != PsiType.INT && type != PsiType.LONG && type != PsiType.SHORT)
                 {
                     retVal = psiExpression.getText();
-                    retVal = retVal.replaceAll("[\\\"\'.]","");
+                    retVal = retVal.replaceAll(";","SEMICOLON");
+                    retVal = retVal.replaceAll(",","COMMA");
+                    retVal = retVal.replaceAll("[\']", "SINGLE_QUOTE");
+                    retVal = retVal.replaceAll("[\\\"=*()]","");
                     retVal = retVal.replaceAll(" ","_");
+                    retVal = retVal.replaceAll("[.]","_");
+                    if(retVal.startsWith("_"))
+                    {
+                        retVal = retVal.substring(1);
+                    }
                     retVal = retVal.trim();
                     retVal = retVal.toUpperCase();
+                    if(retVal.length() == 0)
+                    {
+                        retVal = psiExpression.getText();
+                        retVal = retVal.replaceAll("[\"]","");
+                        retVal = retVal.replaceAll("[\\\\]","SLASH");
+                        retVal = retVal.replaceAll("[=]", "EQUALS");
+                        retVal = retVal.replaceAll("[*]","ASTERISK");
+                        retVal = retVal.replaceAll("[(]","OPEN_PARENTHESIS");
+                        retVal = retVal.replaceAll("[)]","CLOSE_PARENTHESIS");
+                    }
                 }
                 else
                 {
@@ -484,7 +543,6 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
     protected void refreshElements(PsiElement[] elements)
     {
         //TODO: what is this?
-        PsiElement element = elements[0];
         //To change body of implemented methods use File | Settings | File Templates.
     }
 

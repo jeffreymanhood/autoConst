@@ -18,14 +18,15 @@ package auto.inspection;
 import auto.fix.ConstantsExtractorFix;
 import auto.fix.IntroduceAndPropagateDialog;
 import com.intellij.analysis.AnalysisScope;
-import com.intellij.codeInspection.*;
+import com.intellij.codeInspection.BaseJavaLocalInspectionTool;
+import com.intellij.codeInspection.ProblemHighlightType;
+import com.intellij.codeInspection.ProblemsHolder;
 import com.intellij.codeInspection.actions.RunInspectionIntention;
 import com.intellij.codeInspection.ex.InspectionManagerEx;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
 import com.intellij.psi.*;
-import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import org.jetbrains.annotations.Nls;
@@ -133,7 +134,8 @@ public class ConstantsExtractionInspection extends BaseJavaLocalInspectionTool
         @Override
         public void visitLiteralExpression(final PsiLiteralExpression expression)
         {
-            if(!expressionIsEmptyString(expression))
+            if(!expressionIsEmptyString(expression) && !isParentSystemPrint(expression)
+               && !isNullKeyword(expression) && !isLocalVarDeclaration(expression) && !isLabelOrQuery(expression))
             {
                 final ConstantsExtractorFix constantsExtractorFix = new ConstantsExtractorFix(expression);
 
@@ -208,7 +210,97 @@ public class ConstantsExtractionInspection extends BaseJavaLocalInspectionTool
         }
     }
 
-    private boolean expressionIsEmptyString(PsiLiteralExpression expression)
+    private static boolean isLabelOrQuery(PsiLiteralExpression expression)
+    {
+        boolean retVal = false;
+        PsiElement firstChild = expression.getFirstChild();
+        if(firstChild instanceof PsiJavaToken)
+        {
+            if(((PsiJavaToken)firstChild).getTokenType().toString().equals(JavaTokenType.STRING_LITERAL.toString()))
+            {
+                retVal = expression.getText().indexOf(" ") > -1;
+                if(!retVal)
+                {
+                    PsiElement parent = expression.getParent();
+                    if(parent != null)
+                    {
+                        boolean questFound = false;
+                        boolean colonFound = false;
+                        boolean plusFound = false;
+                        for(PsiElement child : parent.getChildren())
+                        {
+                            if(child instanceof PsiJavaToken)
+                            {
+                                String tokenTypeString = ((PsiJavaToken)child).getTokenType().toString();
+                                if(tokenTypeString.equals(JavaTokenType.PLUS.toString()))
+                                    plusFound = true;
+                                else
+                                {
+                                    if(tokenTypeString.equals(JavaTokenType.QUEST.toString()))
+                                        questFound = true;
+                                    else if(tokenTypeString.equals(JavaTokenType.COLON.toString()))
+                                        colonFound = true;
+                                }
+
+                                if(plusFound || (questFound && colonFound))
+                                {
+                                    retVal= true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return retVal;
+    }
+
+    private static boolean isLocalVarDeclaration(PsiLiteralExpression expression)
+    {
+        boolean retVal = false;
+        PsiElement localVarParent = expression.getParent();
+        if(localVarParent != null && localVarParent instanceof PsiLocalVariable)
+        {
+            PsiElement declarationParent = localVarParent.getParent();
+            if(declarationParent != null && declarationParent instanceof PsiDeclarationStatement)
+            {
+                retVal = true;
+            }
+        }
+        return retVal;
+    }
+
+    private static boolean isNullKeyword(PsiLiteralExpression expression)
+    {
+        boolean retVal = false;
+        PsiElement firstChild = expression.getFirstChild();
+        if(firstChild != null && firstChild instanceof PsiJavaToken)
+        {
+            retVal = expression.getText().equals(PsiKeyword.NULL);
+        }
+        return retVal;
+    }
+
+    private static boolean isParentSystemPrint(PsiLiteralExpression expression)
+    {
+        PsiElement expressionParent = expression.getParent();
+        while(expressionParent != null && !(expressionParent instanceof PsiMethodCallExpression))
+        {
+            expressionParent = expressionParent.getParent();
+        }
+
+        boolean retVal = false;
+
+        if (expressionParent != null)
+        {
+            retVal = expressionParent.getText().matches("System.*print.*");
+        }
+
+        return retVal;
+    }
+
+    private static boolean expressionIsEmptyString(PsiLiteralExpression expression)
     {
         return expression.getText().equals("\"\"");
     }
