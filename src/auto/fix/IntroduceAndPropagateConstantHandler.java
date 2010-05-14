@@ -38,7 +38,6 @@ import com.intellij.refactoring.util.occurences.ExpressionOccurenceManager;
 import com.intellij.usageView.UsageInfo;
 import com.intellij.usageView.UsageViewDescriptor;
 import com.intellij.util.Query;
-import org.intellij.lang.annotations.Subst;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
@@ -248,12 +247,19 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
 
     private void processClassHierarchyActionCommand(String constantName)
     {
-        PsiClass topLevelClass = PsiUtil.getTopLevelClass(myLiteralExpression);
-        PsiClass baseClass = findBaseClass(topLevelClass);
+        try
+        {
+            PsiClass topLevelClass = PsiUtil.getTopLevelClass(myLiteralExpression);
+            PsiClass baseClass = findBaseClass(topLevelClass);
 
-        HashSet<PsiExpression> tempElementsFound = findClassHierarchyActionOccurrences(baseClass);
+            HashSet<PsiExpression> tempElementsFound = findClassHierarchyActionOccurrences(baseClass);
 
-        createConstants(tempElementsFound, baseClass, PsiModifier.PROTECTED, false, constantName);
+            createConstants(tempElementsFound, baseClass, PsiModifier.PROTECTED, false, constantName);
+        }
+        catch(PsiInvalidElementAccessException psi)
+        {
+            // ignore - auto mode already replaced the literal expression
+        }
     }
 
     private HashSet<PsiExpression> findClassHierarchyActionOccurrences(PsiClass baseClass)
@@ -294,7 +300,7 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
         return retVal;
     }
 
-    private static void createConstants(HashSet<PsiExpression> psiExpressions, PsiClass destinationClass, @Subst("") String visibility,
+    private static void createConstants(HashSet<PsiExpression> psiExpressions, PsiClass destinationClass, String visibility,
                                         boolean isDestinationClassNew, String constantName)
     {
         PsiManager psiManager = destinationClass.getManager();
@@ -306,15 +312,24 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
         psiExpressions = cleanseFieldOccurrences(psiExpressions);
         if(field == null)
         {
-            field = factory.createField(constantName, psiExpressions.iterator().next().getType());
+            //noinspection ConstantConditions
+            field = factory.createField(checkNameAvailability(constantName, destinationClass), psiExpressions.iterator().next().getType());
             field.setInitializer(psiExpressions.iterator().next());
             //noinspection ConstantConditions
-            field.getModifierList().setModifierProperty(visibility, INCLUDE_SUBPACKAGES);
-            if(anyStaticOccurrences(psiExpressions))
+            field.getModifierList().setModifierProperty(visibility, true);
+            /*if(anyStaticOccurrences(psiExpressions))
             {
                 //noinspection ConstantConditions
-                field.getModifierList().setModifierProperty(PsiModifier.STATIC, INCLUDE_SUBPACKAGES);
+                field.getModifierList().setModifierProperty(PsiModifier.STATIC, true);
             }
+*/
+            /*if(anyCaseStatementOccurrences(psiExpressions))
+            {
+            */    //noinspection ConstantConditions
+                field.getModifierList().setModifierProperty(PsiModifier.STATIC, true);
+                //noinspection ConstantConditions
+                field.getModifierList().setModifierProperty(PsiModifier.FINAL, true);
+            /*}*/
 
             field = (PsiField)CodeStyleManager.getInstance(psiManager.getProject()).reformat(field);
         }
@@ -344,11 +359,46 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
 
     }
 
+    private static boolean anyCaseStatementOccurrences(HashSet<PsiExpression> psiExpressions)
+    {
+        boolean retVal = false;
+
+        for(PsiExpression expression : psiExpressions)
+        {
+            if(expression.getParent() instanceof PsiSwitchLabelStatement)
+            {
+                retVal = true;
+                break;
+            }
+        }
+
+        return retVal;
+    }
+
+    private static String checkNameAvailability(String constantName, PsiClass destinationClass)
+    {
+        String retVal = constantName;
+        for(PsiField field : destinationClass.getAllFields())
+        {
+            if(field.getName().equals(constantName))
+            {
+                retVal += "_AUTO_CREATED";
+                break;
+            }
+        }
+        return retVal;
+    }
+
     private static PsiField getExistingField(HashSet<PsiExpression> psiExpressions, PsiClass destinationClass)
     {
         PsiField retVal = null;
         for(PsiExpression expression : psiExpressions)
         {
+            if(expression.getType().equals(PsiType.BOOLEAN))
+            {
+                break;
+            }
+
             PsiField field = PsiTreeUtil.getParentOfType(expression, PsiField.class);
             if(field != null)
             {
@@ -381,14 +431,17 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
         Iterator<PsiExpression> iterator = psiExpressions.iterator();
         while(iterator.hasNext() && !retVal)
         {
-            PsiMethod method = findContainingMethod(iterator.next());
-            retVal = method.hasModifierProperty(PsiModifier.STATIC);
+            PsiMethod method = PsiTreeUtil.getParentOfType(iterator.next(),PsiMethod.class);
+            if(method != null)
+            {
+                retVal = method.hasModifierProperty(PsiModifier.STATIC) || method.isConstructor();
+            }
         }
 
         return retVal;
     }
 
-    private static PsiMethod findContainingMethod(PsiExpression expression)
+    /*private static PsiMethod findContainingMethod(PsiExpression expression)
     {
         PsiElement methodElement= expression.getParent();
         while(methodElement != null && !(methodElement instanceof PsiMethod))
@@ -399,7 +452,7 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
         assert methodElement != null;
 
         return (PsiMethod)methodElement;
-    }
+    }*/
 
     private static void writeFieldToDestinationClass(final PsiClass destinationClass, final boolean isDestinationClassNew, final PsiField field,
                                                      final boolean fieldAlreadyExists,
@@ -462,12 +515,19 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
                     retVal = retVal.replaceAll(";","SEMICOLON");
                     retVal = retVal.replaceAll(",","COMMA");
                     retVal = retVal.replaceAll("[\']", "SINGLE_QUOTE");
-                    retVal = retVal.replaceAll("[\\\"=*()]","");
+                    retVal = retVal.replaceAll("[\\\\]","");
+                    retVal = retVal.replaceAll("[\\\"=*():#$%@!^]","");
                     retVal = retVal.replaceAll(" ","_");
                     retVal = retVal.replaceAll("[.]","_");
+                    retVal = retVal.replaceAll("-","_");
+                    retVal = retVal.replaceAll("/","_");
                     if(retVal.startsWith("_"))
                     {
                         retVal = retVal.substring(1);
+                    }
+                    if(Character.isDigit(retVal.charAt(0)))
+                    {
+                        retVal = "CONST_" + retVal;
                     }
                     retVal = retVal.trim();
                     retVal = retVal.toUpperCase();
@@ -507,14 +567,23 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
 
     private HashSet<PsiExpression> findOccurrences()
     {
-        HashSet<PsiExpression> hashSet = findClassActionOccurrences(PsiUtil.getTopLevelClass(myLiteralExpression));
-        if(lastActionCommand.equals(IntroduceAndPropagateDialog.CLASS_HIERARCHY_COMMAND))
+        HashSet<PsiExpression> hashSet = new HashSet<PsiExpression>();
+        try
         {
-            hashSet = findClassHierarchyActionOccurrences(findBaseClass(PsiUtil.getTopLevelClass(myLiteralExpression)));
+            hashSet = findClassActionOccurrences(PsiUtil.getTopLevelClass(myLiteralExpression));
+
+            if(lastActionCommand.equals(IntroduceAndPropagateDialog.CLASS_HIERARCHY_COMMAND))
+            {
+                hashSet = findClassHierarchyActionOccurrences(findBaseClass(PsiUtil.getTopLevelClass(myLiteralExpression)));
+            }
+            else if(lastActionCommand.equals(IntroduceAndPropagateDialog.PACKAGE_ACTION_COMMAND))
+            {
+                hashSet = findPackageActionOccurrences(retrievePackage());
+            }
         }
-        else if(lastActionCommand.equals(IntroduceAndPropagateDialog.PACKAGE_ACTION_COMMAND))
+        catch(PsiInvalidElementAccessException psi)
         {
-            hashSet = findPackageActionOccurrences(retrievePackage());
+            // ignore - auto mode already replaced the element
         }
         return hashSet;
     }

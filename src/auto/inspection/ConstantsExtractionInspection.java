@@ -135,7 +135,8 @@ public class ConstantsExtractionInspection extends BaseJavaLocalInspectionTool
         public void visitLiteralExpression(final PsiLiteralExpression expression)
         {
             if(!expressionIsEmptyString(expression) && !isParentSystemPrint(expression)
-               && !isNullKeyword(expression) && !isLocalVarDeclaration(expression) && !isLabelOrQuery(expression))
+                && !isNullKeyword(expression) && !isLocalVarDeclaration(expression) && !isLabelOrQuery(expression)
+                && !isBooleanAssignmentExpression(expression) && !isAnnotationLiteral(expression))
             {
                 final ConstantsExtractorFix constantsExtractorFix = new ConstantsExtractorFix(expression);
 
@@ -208,6 +209,23 @@ public class ConstantsExtractionInspection extends BaseJavaLocalInspectionTool
                 problemsHolder.registerProblem(element, "Just a PsiLiteral . . .", ProblemHighlightType.GENERIC_ERROR_OR_WARNING);
             }
         }
+    }
+
+    private static boolean isAnnotationLiteral(PsiLiteralExpression expression)
+    {
+        return PsiTreeUtil.getParentOfType(expression, PsiAnnotation.class) != null;
+    }
+
+    private static boolean isBooleanAssignmentExpression(PsiLiteralExpression expression)
+    {
+        boolean retVal = false;
+        if(expression.getType().equals(PsiType.BOOLEAN))
+        {
+            retVal = PsiTreeUtil.getParentOfType(expression, PsiAssignmentExpression.class) != null
+                    || PsiTreeUtil.getParentOfType(expression, PsiLocalVariable.class) != null
+                    || expression.getParent() instanceof PsiReturnStatement;
+        }
+        return retVal;
     }
 
     private static boolean isLabelOrQuery(PsiLiteralExpression expression)
