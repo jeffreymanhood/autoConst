@@ -43,7 +43,7 @@ public class IntroduceAndPropagateDialog extends JDialog implements ActionListen
     public static final String CLASS_HIERARCHY_COMMAND = "classHierarchyCommand";
     public static final String PACKAGE_ACTION_COMMAND = "packageActionCommand";
     private static final String OK_BUTTON_ACTION_COMMAND = "okButton";
-    private JTextField constantName;
+    private JTextField constantNameField;
     private static final String PREVIEW_ACTION_COMMAND = "previewActionCommand";
     private static final String CANCEL_ACTION_COMMAND = "cancelActionCommand";
 
@@ -60,11 +60,11 @@ public class IntroduceAndPropagateDialog extends JDialog implements ActionListen
     {
         JPanel mainPanel = new JPanel(new BorderLayout());
 
-        constantName = new JTextField(IntroduceAndPropagateConstantHandler.extractDefaultFieldName(myPsiExpression), 30);
+        constantNameField = new JTextField(IntroduceAndPropagateConstantHandler.extractDefaultFieldName(myPsiExpression), 30);
         JLabel constantNameLabel = new JLabel("Name for new field constant:");
         JPanel constantNamePanel = new JPanel(new GridLayout(2,1,5,5));
         constantNamePanel.add(constantNameLabel);
-        constantNamePanel.add(constantName);
+        constantNamePanel.add(constantNameField);
         mainPanel.add(constantNamePanel, BorderLayout.NORTH);
 
         scopeSelection = new ButtonGroup();
@@ -127,7 +127,7 @@ public class IntroduceAndPropagateDialog extends JDialog implements ActionListen
         String command = e.getActionCommand();
         if(!CANCEL_ACTION_COMMAND.equals(command))
         {
-            propagateSettingsListener.setPropagateSettings(scopeSelection.getSelection().getActionCommand(), constantName.getText(), PREVIEW_ACTION_COMMAND.equals(command));
+            propagateSettingsListener.setPropagateSettings(scopeSelection.getSelection().getActionCommand(), constantNameField.getText(), PREVIEW_ACTION_COMMAND.equals(command));
         }
 
         dispose();

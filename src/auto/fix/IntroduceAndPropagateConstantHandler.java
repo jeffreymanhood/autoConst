@@ -504,58 +504,141 @@ public class IntroduceAndPropagateConstantHandler extends BaseRefactoringProcess
     {
         String retVal = "DEFAULT_FIELD_NAME";
 
-        if(psiExpression != null)
+        PsiMethod psiMethod = null;
+        psiMethod = resolveMethod(psiExpression, psiMethod);
+
+        if(psiMethod != null && psiExpression.getParent() instanceof PsiExpressionList)
         {
-            try
+            retVal = getParameterName(psiExpression, retVal, psiMethod);
+            String text = psiExpression.getText();
+            if(text.matches(".http.*"))
             {
-                PsiType type = psiExpression.getType();
-                if(type != PsiType.DOUBLE && type != PsiType.BYTE && type != PsiType.FLOAT && type != PsiType.INT && type != PsiType.LONG && type != PsiType.SHORT)
-                {
-                    retVal = psiExpression.getText();
-                    retVal = retVal.replaceAll(";","SEMICOLON");
-                    retVal = retVal.replaceAll(",","COMMA");
-                    retVal = retVal.replaceAll("[\']", "SINGLE_QUOTE");
-                    retVal = retVal.replaceAll("[\\\\]","");
-                    retVal = retVal.replaceAll("[\\\"=*():#$%@!^]","");
-                    retVal = retVal.replaceAll(" ","_");
-                    retVal = retVal.replaceAll("[.]","_");
-                    retVal = retVal.replaceAll("-","_");
-                    retVal = retVal.replaceAll("/","_");
-                    if(retVal.startsWith("_"))
-                    {
-                        retVal = retVal.substring(1);
-                    }
-                    if(Character.isDigit(retVal.charAt(0)))
-                    {
-                        retVal = "CONST_" + retVal;
-                    }
-                    retVal = retVal.trim();
-                    retVal = retVal.toUpperCase();
-                    if(retVal.length() == 0)
-                    {
-                        retVal = psiExpression.getText();
-                        retVal = retVal.replaceAll("[\"]","");
-                        retVal = retVal.replaceAll("[\\\\]","SLASH");
-                        retVal = retVal.replaceAll("[=]", "EQUALS");
-                        retVal = retVal.replaceAll("[*]","ASTERISK");
-                        retVal = retVal.replaceAll("[(]","OPEN_PARENTHESIS");
-                        retVal = retVal.replaceAll("[)]","CLOSE_PARENTHESIS");
-                    }
-                }
-                else
-                {
-                    //noinspection ConstantConditions
-                    retVal = psiExpression.getType().getPresentableText().toUpperCase()+"_"+psiExpression.getText();
-                }
+                int lastIndex = text.lastIndexOf("/");
+                text = text.substring(lastIndex + 1, text.length());
             }
-            catch(NullPointerException np)
-            {
-                //ignore - this is a result of the expression no longer having a reference to the file
-                //this is caught again later on and results in no refactoring being performed
-            }
+            retVal += "_" + text;
+            retVal = cleanSpecialCharacters(retVal);
+        }
+        else if(psiExpression != null)
+        {
+            retVal = getQuickAndDirtyName(psiExpression, retVal);
         }
 
         return retVal;
+    }
+
+    private static PsiMethod resolveMethod(PsiExpression psiExpression, PsiMethod psiMethod)
+    {
+        PsiNewExpression newExpression = PsiTreeUtil.getParentOfType(psiExpression, PsiNewExpression.class);
+        if(newExpression != null)
+        {
+            psiMethod = newExpression.resolveConstructor();
+        }
+        else
+        {
+            PsiMethodCallExpression methodCallExpression = PsiTreeUtil.getParentOfType(psiExpression, PsiMethodCallExpression.class);
+            if(methodCallExpression != null)
+            {
+                psiMethod = (PsiMethod)methodCallExpression.getMethodExpression().resolve();
+            }
+        }
+        return psiMethod;
+    }
+
+    private static String getQuickAndDirtyName(PsiExpression psiExpression, String retVal)
+    {
+        try
+        {
+            PsiType type = psiExpression.getType();
+            if(type != PsiType.DOUBLE && type != PsiType.BYTE && type != PsiType.FLOAT && type != PsiType.INT && type != PsiType.LONG && type != PsiType.SHORT)
+            {
+                retVal = psiExpression.getText();
+                retVal = cleanSpecialCharacters(retVal);
+                if(retVal.length() == 0)
+                {
+                    retVal = psiExpression.getText();
+                    retVal = retVal.replaceAll("[\"]","");
+                    retVal = retVal.replaceAll("[\\\\]","SLASH");
+                    retVal = retVal.replaceAll("[=]", "EQUALS");
+                    retVal = retVal.replaceAll("[*]","ASTERISK");
+                    retVal = retVal.replaceAll("[(]","OPEN_PARENTHESIS");
+                    retVal = retVal.replaceAll("[)]","CLOSE_PARENTHESIS");
+                }
+            }
+            else
+            {
+                //noinspection ConstantConditions
+                retVal = psiExpression.getType().getPresentableText().toUpperCase()+"_"+psiExpression.getText();
+            }
+        }
+        catch(NullPointerException np)
+        {
+            //ignore - this is a result of the expression no longer having a reference to the file
+            //this is caught again later on and results in no refactoring being performed
+        }
+        return retVal;
+    }
+
+    private static String cleanSpecialCharacters(String retVal)
+    {
+        retVal = retVal.replaceAll(";","SEMICOLON");
+        retVal = retVal.replaceAll(",","COMMA");
+        retVal = retVal.replaceAll("[\']", "SINGLE_QUOTE");
+        retVal = retVal.replaceAll("[\\\\]","");
+        retVal = retVal.replaceAll("[\\\"=*():#$@!^]","");
+        retVal = retVal.replaceAll("[%]","_PERCENT");
+        retVal = retVal.replaceAll(" ","_");
+        retVal = retVal.replaceAll("[.]","_");
+        retVal = retVal.replaceAll("-","_");
+        retVal = retVal.replaceAll("/","_");
+        if(retVal.startsWith("_"))
+        {
+            retVal = retVal.substring(1);
+        }
+        if(Character.isDigit(retVal.charAt(0)))
+        {
+            retVal = "CONST_" + retVal;
+        }
+        retVal = retVal.trim();
+        retVal = retVal.toUpperCase();
+        return retVal;
+    }
+
+    private static String getParameterName(PsiExpression psiExpression, String retVal, PsiMethod psiMethod)
+    {
+        final PsiElement navElement = psiMethod.getNavigationElement();
+        if (navElement instanceof PsiMethod)
+        {
+            psiMethod = (PsiMethod)navElement;
+        }
+        PsiExpression[] expressions = ((PsiExpressionList)psiExpression.getParent()).getExpressions();
+        int parameterListLocation = -1;
+        for (int i = 0; i < expressions.length; i++)
+        {
+            if (expressions[i] == psiExpression)
+            {
+                parameterListLocation = i;
+                break;
+            }
+        }
+
+        PsiParameter[] parms = psiMethod.getParameterList().getParameters();
+        if (parameterListLocation < parms.length)
+        {
+            retVal = parms[parameterListLocation].getName();
+            /*if (identifier != null)
+            {
+                String name = identifier.getText();
+                if (name != null)
+                {
+                    *//*name = variableNameToPropertyName(name, VariableKind.PARAMETER);
+                    String[] names = getSuggestionsByName(name, variableKind, false);
+                    return new NamesByExprInfo(name, names);*//*
+                    retVal = name.toUpperCase();
+                }
+            }*/
+        }
+        return retVal.toUpperCase();
     }
 
     @Override
