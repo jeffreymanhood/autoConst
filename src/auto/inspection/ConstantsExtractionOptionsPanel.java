@@ -31,11 +31,12 @@ public class ConstantsExtractionOptionsPanel extends JPanel
     private InspectionProfileEntry owner;
     private String autoExtractProperty;
     private String autoFixProperty;
+    private String useSuggestedNameProperty;
     private String classActionCommand;
     private String classHierarchyActionCommand;
     private String packageActionCommand;
 
-    public ConstantsExtractionOptionsPanel(InspectionProfileEntry constantsExtractionInspection, String autoExtractionProperty, String autoFixProperty,
+    public ConstantsExtractionOptionsPanel(InspectionProfileEntry constantsExtractionInspection, String autoExtractionProperty, String autoFixProperty,String useSuggestedNameProperty,
                                            String classActionCommand,
                                            String classHierarchyActionCommand,
                                            String packageActionCommand)
@@ -43,6 +44,7 @@ public class ConstantsExtractionOptionsPanel extends JPanel
         owner = constantsExtractionInspection;
         autoExtractProperty = autoExtractionProperty;
         this.autoFixProperty = autoFixProperty;
+        this.useSuggestedNameProperty = useSuggestedNameProperty;
         this.classActionCommand = classActionCommand;
         this.classHierarchyActionCommand = classHierarchyActionCommand;
         this.packageActionCommand = packageActionCommand;
@@ -53,8 +55,19 @@ public class ConstantsExtractionOptionsPanel extends JPanel
     {
         setLayout(new VerticalFlowLayout(VerticalFlowLayout.TOP, 1, 1, true, false));
 
+        // SETUP THE FULL AUTO MODE OPTIONS
+        final JCheckBox suggestedNameCheckbox = new JCheckBoxNoGuiUtils("Use Suggested Names",getPropertyValue(owner, useSuggestedNameProperty));
+        final ButtonModel suggestedNameModel = suggestedNameCheckbox.getModel();
+        suggestedNameModel.addChangeListener(new ChangeListener()
+        {
+            public void stateChanged(ChangeEvent e)
+            {
+                setPropertyValue(owner, useSuggestedNameProperty, suggestedNameModel.isSelected());
+            }
+        });
+
         // SETUP THE BUTTON GROUP FOR SCOPE SELECTION
-        JLabel scopeLabel = new JLabelNoGuiUtils("Select Scope for Applying Auto Fix");
+        JLabel scopeLabel = new JLabel("Select Scope for Applying Auto Fix");
 
         final JRadioButton classScope = new JRadioButtonNoGuiUtils("Class");
         classScope.setActionCommand(IntroduceAndPropagateDialog.CLASS_ACTION_COMMAND);
@@ -80,18 +93,7 @@ public class ConstantsExtractionOptionsPanel extends JPanel
 
         // SET UP THE DEFAULT CHECK BOXES
         JCheckBox autoExtractionModeCheckBox = new JCheckBox("Enable Auto Mode for Constants Extraction", getPropertyValue(owner, autoExtractProperty));
-        final JCheckBox autoFixModeCheckBox = new JCheckBox("Enable Auto Mode for Constants Propagation", getPropertyValue(owner, autoFixProperty))
-        {
-            @Override
-            public void setEnabled(boolean b)
-            {
-                // best hack ever - don't touch my components GuiUtils! You and your enableChildren method ... don't bring that here.
-                if(!Reflection.getCallerClass(3).toString().matches(".*GuiUtils.*"))
-                {
-                    super.setEnabled(b);
-                }
-            }
-        };
+        final JCheckBox autoFixModeCheckBox = new JCheckBoxNoGuiUtils("Enable Auto Mode for Constants Propagation", getPropertyValue(owner, autoFixProperty));
 
         final ButtonModel autoFixModel = autoFixModeCheckBox.getModel();
         autoFixModel.addChangeListener(new ChangeListener()
@@ -100,6 +102,10 @@ public class ConstantsExtractionOptionsPanel extends JPanel
             {
                 boolean autoFixSelected = autoFixModel.isSelected();
                 setPropertyValue(owner, autoFixProperty, autoFixSelected);
+
+                suggestedNameCheckbox.setEnabled(autoFixSelected);
+                suggestedNameCheckbox.setSelected(autoFixSelected);
+
                 classScope.setEnabled(autoFixSelected);
                 classHierarchyScope.setEnabled(autoFixSelected);
                 packageScope.setEnabled(autoFixSelected);
@@ -134,6 +140,7 @@ public class ConstantsExtractionOptionsPanel extends JPanel
         tabbedAutoFixPanel.add(autoFixModeCheckBox);
         add(tabbedAutoFixPanel);
 
+        add(createDoubleTabbedPanel(suggestedNameCheckbox));
         add(createDoubleTabbedPanel(scopeLabel));
         add(createDoubleTabbedPanel(classScope));
         add(createDoubleTabbedPanel(classHierarchyScope));
@@ -198,21 +205,20 @@ public class ConstantsExtractionOptionsPanel extends JPanel
         }
     }
 
-
-    private static class JLabelNoGuiUtils extends JLabel
+    private class JCheckBoxNoGuiUtils extends JCheckBox
     {
-        public JLabelNoGuiUtils(String s)
+        public JCheckBoxNoGuiUtils(String label, boolean enabled)
         {
-            super(s);
+            super(label, enabled);
         }
 
         @Override
-        public void setEnabled(boolean enabled)
+        public void setEnabled(boolean b)
         {
-            // the hack so good we had to use it twice
+            // best hack ever - don't touch my components GuiUtils! You and your enableChildren method ... don't bring that here.
             if(!Reflection.getCallerClass(3).toString().matches(".*GuiUtils.*"))
             {
-                super.setEnabled(enabled);
+                super.setEnabled(b);
             }
         }
     }
@@ -227,7 +233,7 @@ public class ConstantsExtractionOptionsPanel extends JPanel
         @Override
         public void setEnabled(boolean b)
         {
-            // the hack so good we had to use it thrice
+            // the hack so good we had to use it twice
             if(!Reflection.getCallerClass(3).toString().matches(".*GuiUtils.*"))
             {
                 super.setEnabled(b);

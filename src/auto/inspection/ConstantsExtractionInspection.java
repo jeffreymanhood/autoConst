@@ -43,6 +43,7 @@ public class ConstantsExtractionInspection extends BaseJavaLocalInspectionTool
 {
     public static boolean constExtract_autoEnabled = false;
     public static boolean constExtract_autoFix = false;
+    public static boolean constExtract_useSuggestedName = false;
     public static boolean classActionCommand = true;
     public static boolean classHierarchyActionCommand = false;
     public static boolean packageActionCommand = false;
@@ -52,7 +53,7 @@ public class ConstantsExtractionInspection extends BaseJavaLocalInspectionTool
     @Override
     public JComponent createOptionsPanel()
     {
-        return new ConstantsExtractionOptionsPanel(this, "constExtract_autoEnabled", "constExtract_autoFix","classActionCommand","classHierarchyActionCommand","packageActionCommand");
+        return new ConstantsExtractionOptionsPanel(this, "constExtract_autoEnabled", "constExtract_autoFix","constExtract_useSuggestedName","classActionCommand","classHierarchyActionCommand","packageActionCommand");
     }
 
     private synchronized static void setDetected(PsiLiteralExpression expression)
@@ -177,12 +178,9 @@ public class ConstantsExtractionInspection extends BaseJavaLocalInspectionTool
                         {
                             command = IntroduceAndPropagateDialog.PACKAGE_ACTION_COMMAND;
                         }
-                        fixNow.applyDefaultFix(project, command);
-                        /*fixNow.applyFix(project, InspectionManagerEx.getInstance(project).createProblemDescriptor(expression.getOriginalElement(),
-                                                                                                                    getDisplayName(),
-                                                                                                                    fixNow,
-                                                                                                                    ProblemHighlightType.GENERIC_ERROR_OR_WARNING,
-                                                                                                                    isOnTheFly));*/
+
+                        fixNow.applyDefaultFix(project, command, constExtract_useSuggestedName);
+
                     }
                     else
                     {

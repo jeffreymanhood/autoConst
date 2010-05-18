@@ -18,6 +18,8 @@ package auto.fix;
 import com.intellij.codeInspection.LocalQuickFix;
 import com.intellij.codeInspection.ProblemDescriptor;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.InputValidator;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.psi.PsiLiteralExpression;
 import org.jetbrains.annotations.NotNull;
 
@@ -55,9 +57,31 @@ public class ConstantsExtractorFix implements LocalQuickFix, EventListener
         introduceConstantHandler.invoke(project, constantExpression, descriptor);
     }
 
-    public void applyDefaultFix(Project project, String command)
+    public void applyDefaultFix(Project project, String command, boolean useSuggestedName)
     {
         IntroduceAndPropagateConstantHandler introduceConstantHandler = new IntroduceAndPropagateConstantHandler(project, constantExpression);
-        introduceConstantHandler.setPropagateSettings(command, IntroduceAndPropagateConstantHandler.extractDefaultFieldName(constantExpression), false);
+        if(useSuggestedName)
+        {
+            introduceConstantHandler.setPropagateSettings(command, IntroduceAndPropagateConstantHandler.extractDefaultFieldName(constantExpression), false);
+        }
+        else
+        {
+            //TODO: there's some utility that let's you highlight the actual text in the file and rename right in the editor - figure out how to use that 
+            String suggestedName = IntroduceAndPropagateConstantHandler.extractDefaultFieldName(constantExpression);
+            String constantName = Messages
+                .showEditableChooseDialog("Set constant name","Rename Suggested Constant Name", null, new String[]{}, suggestedName, new InputValidator()
+                    {
+                        public boolean checkInput(String inputString)
+                        {
+                            return true;
+                        }
+
+                        public boolean canClose(String inputString)
+                        {
+                            return true;
+                        }
+                    });
+            introduceConstantHandler.setPropagateSettings(command, constantName != null ? constantName : suggestedName, false);
+        }
     }
 }
